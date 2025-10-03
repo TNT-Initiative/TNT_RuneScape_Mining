@@ -1,0 +1,27 @@
+# Configuration for RuneScape Mining Bot
+
+# Inventory Settings
+inventory_slots = 28
+
+# Color Detection Settings (RGB values)
+# Adjust these based on your screen and graphics settings
+tin_ore_color_r = 150
+tin_ore_color_g = 150
+tin_ore_color_b = 150
+
+copper_ore_color_r = 139
+copper_ore_color_g = 69
+copper_ore_color_b = 19
+
+# Color matching tolerance (0-255)
+color_tolerance = 30
+
+# Timing Settings (in seconds)
+mining_wait_time = 3
+bank_walk_time = 5
+mine_walk_time = 5
+ore_search_delay = 2
+
+# Safety Settings
+failsafe_enabled = true
+pause_between_actions = 0.5
