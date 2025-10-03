@@ -9,12 +9,13 @@ import pyautogui
 from PIL import Image, ImageGrab
 import numpy as np
 from typing import Tuple, Optional, List
-
+import keyboard
+import cv2
 
 class MiningBot:
     """Bot for automating mining in RuneScape Classic."""
     
-    def __init__(self, inventory_slots: int = 28):
+    def __init__(self, inventory_slots: int = 27):
         """
         Initialize the mining bot.
         
@@ -31,12 +32,28 @@ class MiningBot:
         
         # Color definitions for ore detection (RGB values)
         # These are approximate and may need adjustment for different screens
-        self.tin_ore_color = (150, 150, 150)  # Grayish
-        self.copper_ore_color = (139, 69, 19)  # Brownish
-        
+        self.tin_ore_color = [(134, 124, 123),(128, 118, 117),(137, 125, 125),(81, 75, 75),(121, 112, 112)]  # Grayish rgb(134 124 123) rgb(128 118 117) rgb(137 125 125) rgb(81 75 75) rgb(121 112 112)
+        self.copper_ore_color = [(131, 91, 56),(119, 83, 51),(149, 104, 63)]  # Brownish rgb(131 91 56) rgb(119 83 51) rgb(149 104, 63)
+
         # Tolerance for color matching
-        self.color_tolerance = 30
-        
+        self.color_tolerance = 1
+
+
+        self.tin_template = cv2.imread('Tin.png', 0)
+        self.copper_template = cv2.imread('Copper.png', 0)
+
+        self.w_tin, self.h_tin = self.tin_template.shape[::-1]
+        self.w_copper, self.h_copper = self.copper_template.shape[::-1]
+
+        self.inventory_tin_template = cv2.imread('InventoryTin.png', 0)
+        self.inventory_copper_template = cv2.imread('InventoryCopper.png', 0)
+
+        self.w_inv_tin, self.h_inv_tin = self.inventory_tin_template.shape[::-1]
+        self.w_inv_copper, self.h_inv_copper = self.inventory_copper_template.shape[::-1]
+
+        self.mind_ore_template = cv2.imread('MindOre.png', 0)
+        self.w_mind, self.h_mind = self.mind_ore_template.shape[::-1]
+
     def capture_screen(self, region: Optional[Tuple[int, int, int, int]] = None) -> Image.Image:
         """
         Capture the screen or a specific region.
@@ -77,6 +94,99 @@ class MiningBot:
         
         return matches
     
+
+
+    def find_ore_with_template(self, template_img, template_w, template_h, threshold=0.5) -> List[Tuple[int, int]]:
+        """
+        Finds all occurrences of a template image on the screen.
+        
+        Args:
+            template_img: The loaded OpenCV template image (in grayscale).
+            template_w: The width of the template.
+            template_h: The height of the template.
+            threshold: The confidence threshold for a match (0.0 to 1.0).
+            
+        Returns:
+            A list of center coordinates (x, y) for each match found.
+        """
+        # Capture the screen and convert it to a NumPy array and then grayscale
+        screen_pil = self.capture_screen()
+        screen_cv = np.array(screen_pil)
+        screen_gray = cv2.cvtColor(screen_cv, cv2.COLOR_BGR2GRAY)
+        
+        # Perform the template matching
+        res = cv2.matchTemplate(screen_gray, template_img, cv2.TM_CCOEFF_NORMED)
+
+        #print biggest 5 matches
+        print(np.sort(res.flatten())[-5:])
+        
+        # Find the locations of matches that exceed the threshold
+        locations = np.where(res >= threshold)
+        
+        # Unzip the locations and store them as a list of (x, y) points
+        points = []
+        for pt in zip(*locations[::-1]):  # Switch (y, x) to (x, y)
+            # Calculate the center of the found rectangle
+            center_x = pt[0] + template_w // 2
+            center_y = pt[1] + template_h // 2
+            points.append((center_x, center_y))
+            
+        return points
+
+
+
+    def find_gridpoints_with_matches(self, screen, matches, grid_size = 20):
+        """
+        Find grid points that have all matches in them.
+        
+        Args:
+            matches: List of lists of (x, y) coordinates
+            grid_size: Size of each grid cell
+        """
+        
+        w, h = screen.size
+        grid_w, grid_h = w // grid_size, h // grid_size
+        match_types = len(matches)
+        num_of_matches = np.zeros((grid_h, grid_w, match_types), dtype=int)
+        avg_pos = np.zeros((grid_h, grid_w, 2), dtype=int)
+
+        for i, match_list in enumerate(matches):
+            for match in match_list:
+                grid_x, grid_y = match[0] // grid_size, match[1] // grid_size
+                num_of_matches[grid_y, grid_x, i] += 1
+                avg_pos[grid_y, grid_x] += match
+
+        gridpoints_with_all_matches = []
+        for y in range(grid_h):
+            for x in range(grid_w):
+                if all(num_of_matches[y, x, i] > 0 for i in range(match_types)):
+                    num_of_matches_in_cell = sum(num_of_matches[y, x, i] for i in range(match_types))
+                    avg_pos[y, x] = avg_pos[y, x]//num_of_matches_in_cell
+                    gridpoints_with_all_matches.append((avg_pos[y, x][0], avg_pos[y, x][1]))
+
+        return gridpoints_with_all_matches
+
+    
+    def find_k_closest_point(self, screen, points, k):
+        w,h = screen.size
+        center = (w//2, h//2)
+        dist = np.zeros(len(points))
+        for i, point in enumerate(points):
+            dist[i] = (point[0]-center[0])**2 + (point[1]-center[1])**2
+        
+        closest_indices = np.argsort(dist)[:k]
+        return [points[i] for i in closest_indices]
+
+    def click_ore(self, position: Tuple[int, int]) -> None:
+        """
+        Click on ore at the given position.
+        
+        Args:
+            position: (x, y) coordinates to click
+        """
+        pyautogui.moveTo(position[0], position[1])
+        pyautogui.click()
+
     def find_ore(self, ore_type: str = 'both') -> Optional[Tuple[int, int]]:
         """
         Find ore on the screen.
@@ -87,33 +197,124 @@ class MiningBot:
         Returns:
             Tuple of (x, y) coordinates of ore, or None if not found
         """
-        screen = self.capture_screen()
-        
-        colors_to_check = []
-        if ore_type in ['tin', 'both']:
-            colors_to_check.append(self.tin_ore_color)
-        if ore_type in ['copper', 'both']:
-            colors_to_check.append(self.copper_ore_color)
-        
-        for color in colors_to_check:
-            matches = self.find_color(screen, color, self.color_tolerance)
-            if matches:
-                # Return the first match
-                return matches[0]
-        
-        return None
-    
-    def click_ore(self, position: Tuple[int, int]) -> None:
+        counter = 0
+        while True:
+            counter += 1
+            screen = self.capture_screen()
+            
+            colors_to_check = []
+            if ore_type in ['tin', 'both']:
+                colors_to_check.append(self.tin_ore_color)
+            if ore_type in ['copper', 'both']:
+                colors_to_check.append(self.copper_ore_color)
+            
+            
+
+            for color in colors_to_check:
+                matches = []
+                for c in color:
+                    matches.append( self.find_color(screen, c, self.color_tolerance))
+
+                screen_temp = screen.copy()
+
+
+
+                gridpoints = self.find_gridpoints_with_matches(screen_temp, matches)
+
+                gridpoints = self.find_k_closest_point(screen_temp, gridpoints, 5)
+
+                # get random gridpoint
+                rnd_point = gridpoints[np.random.randint(0, len(gridpoints))] if gridpoints else None
+                return rnd_point
+                # if rnd_point:
+                #     # click on this point
+                #     pyautogui.moveTo(rnd_point[0], rnd_point[1])
+                #     pyautogui.click()
+                #     time.sleep(3)  # wait a bit after clicking      
+                #     # save screenshot
+                #     # mark all points magenta
+                #     for match_list in matches:
+                #         for match in match_list:
+                #             screen_temp.putpixel(match, (255, 0, 255))
+
+                #     # mark the clicked point yellow
+                #     screen_temp.putpixel(rnd_point, (255, 255, 0))
+                #     screen_temp.save(f"debug_screenshot_click_{counter}.png")      
+            # del screen_temp
+            # del screen
+
+                # # draw green circles for each gridpoint
+                # for gp in gridpoints:
+                #     screen_temp.putpixel(gp, (0, 255, 0))
+                # if gridpoints:
+                #     print(f"Found {len(gridpoints)} gridpoints with all matches for color {color} (set {counter})")
+
+                # #save screenshot
+                # screen_temp.save(f"debug_screenshot_{counter%2}.png")
+                # counter += 1
+
+                # add magenta pixels for each match
+                # for match_list in matches:
+                #     rnd_num = np.random.randint(0, 200) 
+                #     for match in match_list:
+                #         screen_temp.putpixel(match, (255, rnd_num, 255)) 
+
+
+                # #save screenshot
+                # screen_temp.save(f"debug_screenshot_{counter%2}.png")
+                # print(f"Found {len(matches)} matches for color {color} (set {counter})")
+                # counter += 1
+
+
+
+                # Pause to allow user to see output
+                # if matches:
+                #     # Return the first match
+                #     return matches[0]
+
+
+
+    def count_ore(self, threshold=0.9) -> List[Tuple[int, int]]:
         """
-        Click on ore at the given position.
+        Finds all occurrences of a template image on the screen.
         
         Args:
-            position: (x, y) coordinates to click
+            template_img: The loaded OpenCV template image (in grayscale).
+            template_w: The width of the template.
+            template_h: The height of the template.
+            threshold: The confidence threshold for a match (0.0 to 1.0).
+            
+        Returns:
+            A list of center coordinates (x, y) for each match found.
         """
-        pyautogui.click(position[0], position[1])
-        print(f"Clicking ore at position {position}")
-    
-    def wait_for_mining(self, timeout: int = 10) -> bool:
+        # Capture the screen and convert it to a NumPy array and then grayscale
+        screen_pil = self.capture_screen()
+        screen_cv = np.array(screen_pil)
+        screen_gray = cv2.cvtColor(screen_cv, cv2.COLOR_BGR2GRAY)
+        
+        # Perform the template matching
+        res = cv2.matchTemplate(screen_gray, self.inventory_copper_template, cv2.TM_CCOEFF_NORMED)
+
+        #print biggest 5 matches
+        # print(np.sort(res.flatten())[-5:])
+        
+        # Find the locations of matches that exceed the threshold
+        locations = np.where(res >= threshold)
+        
+        # Unzip the locations and store them as a list of (x, y) points
+        points = []
+        for pt in zip(*locations[::-1]):  # Switch (y, x) to (x, y)
+            # Calculate the center of the found rectangle
+            center_x = pt[0] + self.w_inv_copper // 2
+            center_y = pt[1] + self.h_inv_copper // 2
+            points.append((center_x, center_y))
+        
+        print(len(points))
+        time.sleep(1)
+        return len(points)
+
+
+    def wait_for_mining(self,) -> bool:
         """
         Wait for mining animation to complete.
         
@@ -123,10 +324,27 @@ class MiningBot:
         Returns:
             True if mining completed, False if timeout
         """
-        # In a real implementation, this would check for mining animation
-        # For now, we'll use a simple delay
-        time.sleep(3)
-        return True
+        # mind_finish = []
+
+        # while True: 
+        #     mind_finish = self.find_ore_with_template(self.mind_ore_template, self.w_mind, self.h_mind, threshold=0.95)
+        #     print(f"Mining animation matches: {len(mind_finish)}")
+        #     if len(mind_finish) > 0:
+        #         print("Mining animation finished.")
+        #         return True
+        #     time.sleep(0.5)
+
+        start_time = time.time()
+
+        while True:
+            # print(f"Ore count: {self.count_ore()}, {self.ore_count}")
+            delta_time = time.time() - start_time
+            if delta_time > 10:
+                print("Timeout waiting for mining to complete")
+                return False
+            if self.count_ore() > self.ore_count:
+                self.ore_count = self.count_ore()
+                return True
     
     def check_inventory_full(self) -> bool:
         """
@@ -144,13 +362,28 @@ class MiningBot:
         Returns:
             True if ore was mined, False otherwise
         """
-        ore_position = self.find_ore('both')
+
+        tin_rocks = self.find_ore_with_template(self.tin_template, self.w_tin, self.h_tin)
+        copper_rocks = self.find_ore_with_template(self.copper_template, self.w_copper, self.h_copper)
+        all_rocks = tin_rocks + copper_rocks
+        
+        print(f"All rocks: {len(all_rocks)}")
+
+
+        # ore_position = self.find_ore('both')
+        ore_position = all_rocks[np.random.randint(0, len(all_rocks))]
+
+        print(f"Ore position: {ore_position}")
         
         if ore_position:
+            # screen = self.capture_screen()
+            # screen.putpixel(ore_position, (0, 255, 0))
+            # screen.save(f"debug_screenshot_mine_{int(time.time())}.png")
             self.click_ore(ore_position)
+
+            self.ore_count = self.count_ore()
             
             if self.wait_for_mining():
-                self.ore_count += 1
                 print(f"Ore mined! Total: {self.ore_count}/{self.inventory_slots}")
                 return True
         
@@ -224,6 +457,15 @@ class MiningBot:
         print("Starting RuneScape Mining Bot...")
         print("Press Ctrl+C to stop")
         print(f"Inventory size: {self.inventory_slots} slots")
+
+        self.ore_count = self.count_ore()
+
+        # Check for 'p' key press to stop the bot
+        while True:
+            if keyboard.is_pressed('enter'):
+                print("Bot started by user (Enter key pressed)")
+                break
+
         
         try:
             while self.mining:
@@ -233,19 +475,19 @@ class MiningBot:
                         print("No ore found, waiting...")
                         time.sleep(2)
                 
-                if not self.mining:
-                    break
+                print(f"\n✓ Inventory full! ({self.ore_count}/{self.inventory_slots})")
+                break
                 
-                # Banking phase
-                print("\nInventory full! Going to bank...")
-                self.walk_to_bank()
+                # # Banking phase
+                # print("\nInventory full! Going to bank...")
+                # self.walk_to_bank()
                 
-                if self.open_bank():
-                    self.deposit_ore()
-                    self.close_bank()
+                # if self.open_bank():
+                #     self.deposit_ore()
+                #     self.close_bank()
                 
                 # Return to mining
-                self.walk_to_mine()
+                # self.walk_to_mine()
                 
         except KeyboardInterrupt:
             print("\nBot stopped by user")
@@ -266,7 +508,6 @@ def main():
     print("- Return to mining after banking")
     print("\nIMPORTANT: Position your RuneScape window and start near ores")
     print("Press Enter to start...")
-    input()
     
     bot = MiningBot(inventory_slots=28)
     bot.run()
