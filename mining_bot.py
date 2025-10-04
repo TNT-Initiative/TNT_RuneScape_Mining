@@ -39,20 +39,48 @@ class MiningBot:
         self.color_tolerance = 1
 
 
-        self.tin_template = cv2.imread('Tin.png', 0)
-        self.copper_template = cv2.imread('Copper.png', 0)
+        self.tin_template = cv2.imread('Templates/Tin.png', 0)
+        self.copper_template = cv2.imread('Templates/Copper.png', 0)
 
         self.w_tin, self.h_tin = self.tin_template.shape[::-1]
         self.w_copper, self.h_copper = self.copper_template.shape[::-1]
 
-        self.inventory_tin_template = cv2.imread('InventoryTin.png', 0)
-        self.inventory_copper_template = cv2.imread('InventoryCopper.png', 0)
+        self.inventory_tin_template = cv2.imread('Templates/InventoryTin.png', 0)
+        self.inventory_copper_template = cv2.imread('Templates/InventoryCopper.png', 0)
 
         self.w_inv_tin, self.h_inv_tin = self.inventory_tin_template.shape[::-1]
         self.w_inv_copper, self.h_inv_copper = self.inventory_copper_template.shape[::-1]
 
-        self.mind_ore_template = cv2.imread('MindOre.png', 0)
+        self.mind_ore_template = cv2.imread('Templates/MindOre.png', 0)
         self.w_mind, self.h_mind = self.mind_ore_template.shape[::-1]
+
+        # self.waypoint_template = cv2.imread('Templates/Waypoint.png', 0)
+        # self.w_waypoint, self.h_waypoint = self.waypoint_template.shape[::-1]
+
+        self.pickaxe_template = cv2.imread('Templates/Pickaxe.png', 0)
+        self.w_pickaxe, self.h_pickaxe = self.pickaxe_template.shape[::-1]
+
+        self.to_bank_waypoints = [cv2.imread('Templates/Waypoint.png', 0),
+                                   cv2.imread('Templates/Waypoint2.png', 0),
+                                   cv2.imread('Templates/Waypoint3.png', 0),
+                                   cv2.imread('Templates/Waypoint4.png', 0),
+                                   cv2.imread('Templates/Waypoint5.png', 0),
+                                   cv2.imread('Templates/Waypoint6.png', 0),
+                                   cv2.imread('Templates/Waypoint7.png', 0)]
+        
+        self.to_mine_waypoints = [cv2.imread('Templates/ToMine1.png', 0),
+                                   cv2.imread('Templates/ToMine2.png', 0),
+                                   cv2.imread('Templates/ToMine3.png', 0),
+                                   cv2.imread('Templates/ToMine4.png', 0),
+                                   cv2.imread('Templates/ToMine5.png', 0),
+                                   cv2.imread('Templates/ToMine6.png', 0),
+                                   cv2.imread('Templates/ToMine7.png', 0),
+                                   cv2.imread('Templates/ToMine8.png', 0),
+                                   cv2.imread('Templates/ToMine9.png', 0)]
+
+        self.exp_button_template = cv2.imread('Templates/ExpButton.png', 0)
+
+        self.exit_template = cv2.imread('Templates/ExitBank.png', 0)
 
     def capture_screen(self, region: Optional[Tuple[int, int, int, int]] = None) -> Image.Image:
         """
@@ -93,10 +121,25 @@ class MiningBot:
                     matches.append((x, y))
         
         return matches
-    
 
+    def get_best_match(self, template_img) -> Optional[Tuple[int, int]]:
+        screen_pil = self.capture_screen()
+        screen_cv = np.array(screen_pil)
+        screen_gray = cv2.cvtColor(screen_cv, cv2.COLOR_BGR2GRAY)
+        
+        # Perform the template matching
+        res = cv2.matchTemplate(screen_gray, template_img, cv2.TM_CCOEFF_NORMED)
+        # return max location
+        location = np.argmax(res)
+        point = np.zeros(2, dtype=int)
+        template_w, template_h = template_img.shape[::-1]
+        center_x = (location % res.shape[1]) + template_w // 2
+        center_y = (location // res.shape[1]) + template_h // 2
+        point[0] = center_x
+        point[1] = center_y
+        return point
 
-    def find_ore_with_template(self, template_img, template_w, template_h, threshold=0.5) -> List[Tuple[int, int]]:
+    def find_location_with_template(self, template_img, template_w, template_h, threshold=0.5) -> List[Tuple[int, int]]:
         """
         Finds all occurrences of a template image on the screen.
         
@@ -118,10 +161,11 @@ class MiningBot:
         res = cv2.matchTemplate(screen_gray, template_img, cv2.TM_CCOEFF_NORMED)
 
         #print biggest 5 matches
-        print(np.sort(res.flatten())[-5:])
+        #print(np.sort(res.flatten())[-5:])
         
         # Find the locations of matches that exceed the threshold
         locations = np.where(res >= threshold)
+        res = res[locations]
         
         # Unzip the locations and store them as a list of (x, y) points
         points = []
@@ -130,9 +174,9 @@ class MiningBot:
             center_x = pt[0] + template_w // 2
             center_y = pt[1] + template_h // 2
             points.append((center_x, center_y))
-            
-        return points
 
+        return points
+    
 
 
     def find_gridpoints_with_matches(self, screen, matches, grid_size = 20):
@@ -177,7 +221,7 @@ class MiningBot:
         closest_indices = np.argsort(dist)[:k]
         return [points[i] for i in closest_indices]
 
-    def click_ore(self, position: Tuple[int, int]) -> None:
+    def click_on(self, position: Tuple[int, int]) -> None:
         """
         Click on ore at the given position.
         
@@ -239,7 +283,7 @@ class MiningBot:
 
                 #     # mark the clicked point yellow
                 #     screen_temp.putpixel(rnd_point, (255, 255, 0))
-                #     screen_temp.save(f"debug_screenshot_click_{counter}.png")      
+                #     screen_temp.save(f"/Debug Screenshots/debug_screenshot_click_{counter}.png")      
             # del screen_temp
             # del screen
 
@@ -250,7 +294,7 @@ class MiningBot:
                 #     print(f"Found {len(gridpoints)} gridpoints with all matches for color {color} (set {counter})")
 
                 # #save screenshot
-                # screen_temp.save(f"debug_screenshot_{counter%2}.png")
+                # screen_temp.save(f"/Debug Screenshots/debug_screenshot_{counter%2}.png")
                 # counter += 1
 
                 # add magenta pixels for each match
@@ -261,7 +305,7 @@ class MiningBot:
 
 
                 # #save screenshot
-                # screen_temp.save(f"debug_screenshot_{counter%2}.png")
+                # screen_temp.save(f"/Debug Screenshots/debug_screenshot_{counter%2}.png")
                 # print(f"Found {len(matches)} matches for color {color} (set {counter})")
                 # counter += 1
 
@@ -342,7 +386,7 @@ class MiningBot:
             if delta_time > 10:
                 print("Timeout waiting for mining to complete")
                 return False
-            if self.count_ore() > self.ore_count:
+            if self.count_ore() > self.ore_count and not self.check_inventory_full():
                 self.ore_count = self.count_ore()
                 return True
     
@@ -353,6 +397,9 @@ class MiningBot:
         Returns:
             True if inventory is full, False otherwise
         """
+        print("Checking if inventory is full...")
+        print("Inventory count:", self.count_ore())
+        print("Inventory slots:", self.inventory_slots)
         return self.ore_count >= self.inventory_slots
     
     def mine_ore(self) -> bool:
@@ -363,8 +410,8 @@ class MiningBot:
             True if ore was mined, False otherwise
         """
 
-        tin_rocks = self.find_ore_with_template(self.tin_template, self.w_tin, self.h_tin)
-        copper_rocks = self.find_ore_with_template(self.copper_template, self.w_copper, self.h_copper)
+        tin_rocks = self.find_location_with_template(self.tin_template, self.w_tin, self.h_tin)
+        copper_rocks = self.find_location_with_template(self.copper_template, self.w_copper, self.h_copper)
         all_rocks = tin_rocks + copper_rocks
         
         print(f"All rocks: {len(all_rocks)}")
@@ -378,8 +425,8 @@ class MiningBot:
         if ore_position:
             # screen = self.capture_screen()
             # screen.putpixel(ore_position, (0, 255, 0))
-            # screen.save(f"debug_screenshot_mine_{int(time.time())}.png")
-            self.click_ore(ore_position)
+            # screen.save(f"/Debug Screenshots/debug_screenshot_mine_{int(time.time())}.png")
+            self.click_on(ore_position)
 
             self.ore_count = self.count_ore()
             
@@ -388,6 +435,15 @@ class MiningBot:
                 return True
         
         return False
+    
+    def toggle_run(self) -> None:
+        """
+        Toggle run mode on/off by clicking the run button.
+        """
+        exp_button_pos = self.get_best_match(self.exp_button_template)
+        pyautogui.moveTo(exp_button_pos[0]+40, exp_button_pos[1]+90)
+        pyautogui.click()
+        time.sleep(0.5)
     
     def walk_to_bank(self) -> None:
         """
@@ -423,23 +479,33 @@ class MiningBot:
         """
         Deposit all ore in the bank.
         """
-        print(f"Depositing {self.ore_count} ore...")
-        # In a real implementation, this would:
-        # 1. Click on each ore stack in inventory
-        # 2. Select deposit option
-        # 3. Confirm all ore is deposited
-        time.sleep(2)
-        self.ore_count = 0
-        print("All ore deposited")
-    
+        pickaxe_pos = self.get_best_match(self.pickaxe_template)
+        pickaxe_pos = np.array([pickaxe_pos[0]-self.w_pickaxe//2, pickaxe_pos[1]-self.h_pickaxe//2])
+        while True:
+            inventory_ore_pos = self.find_location_with_template(self.inventory_copper_template, self.w_inv_copper, self.h_inv_copper, threshold=0.9)
+            if len(inventory_ore_pos) == 0:
+                print("No ore left in inventory to deposit")
+                return True
+            for ore in inventory_ore_pos:
+                # print(f"Found {len(inventory_ore_pos)} ore in inventory")
+                if ore[0] > pickaxe_pos[0] and ore[1] > pickaxe_pos[1]:
+                    print("Found ore in inventory:", ore)
+                    pyautogui.moveTo(ore[0], ore[1])
+                    pyautogui.click(button='right')
+                    pyautogui.moveTo(ore[0], ore[1]+88)
+                    pyautogui.click()
+                    time.sleep(0.5)
+                    break
+
     def close_bank(self) -> None:
         """
         Close the bank interface.
         """
-        print("Closing bank...")
-        # Press Escape or click close button
-        pyautogui.press('esc')
-        time.sleep(1)
+        
+        exit_pos = self.get_best_match(self.exit_template)
+        pyautogui.moveTo(exit_pos[0], exit_pos[1])
+        pyautogui.click()
+        time.sleep(0.5)
     
     def walk_to_mine(self) -> None:
         """
@@ -450,6 +516,31 @@ class MiningBot:
         time.sleep(5)
         print("Arrived at mine")
     
+
+    def go_to_bank(self) -> None:
+        """
+        Walk character the predefined waypoint path.
+        """
+        self.go_to_waypoints(self.to_bank_waypoints)
+
+    def go_to_mine(self) -> None:
+        """
+        Walk character the predefined waypoint path.
+        """
+        self.go_to_waypoints(self.to_mine_waypoints)
+
+    def go_to_waypoints(self, waypoint_templates) -> None:
+        """
+        Walk character the predefined waypoint path.
+        """
+        for i in range(len(waypoint_templates)):
+            waypoint = self.get_best_match(waypoint_templates[i])
+            print(f"Found waypoint {i+1} at: {waypoint}")
+            print("Walking to waypoint...")
+            self.click_on(waypoint)
+            time.sleep(10)
+            print("Arrived at waypoint")
+
     def run(self) -> None:
         """
         Main bot loop.
@@ -468,16 +559,29 @@ class MiningBot:
 
         
         try:
-            while self.mining:
-                # Mining phase
-                while not self.check_inventory_full() and self.mining:
-                    if not self.mine_ore():
-                        print("No ore found, waiting...")
-                        time.sleep(2)
+            while True:
+                self.toggle_run()
+                # # Mining phase
+                if not self.check_inventory_full():
+                    while not self.check_inventory_full() and self.mining:
+                        if not self.mine_ore():
+                            print("No ore found, waiting...")
+                            time.sleep(2)
                 
                 print(f"\n✓ Inventory full! ({self.ore_count}/{self.inventory_slots})")
-                break
-                
+                self.mining = False
+                self.toggle_run()
+                self.go_to_bank()
+
+                self.deposit_ore()
+
+                self.close_bank()
+
+                self.ore_count = 0
+
+                self.go_to_mine()
+                self.mining = True
+
                 # # Banking phase
                 # print("\nInventory full! Going to bank...")
                 # self.walk_to_bank()
@@ -509,7 +613,7 @@ def main():
     print("\nIMPORTANT: Position your RuneScape window and start near ores")
     print("Press Enter to start...")
     
-    bot = MiningBot(inventory_slots=28)
+    bot = MiningBot()
     bot.run()
 
 
